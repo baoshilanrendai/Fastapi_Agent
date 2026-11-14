@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 助手</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232f6fed'/%3E%3Cpath d='M8 12h8M12 8v8' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css">
+<style>
+:root{
+  --bg:#f3f5f9; --panel:#ffffff; --ink:#1a2233; --ink-2:#5b6577; --line:#e6eaf1;
+  --brand:#2f6fed; --brand-2:#1e56c4; --brand-soft:#eaf1fe;
+  --user-bubble:#2f6fed; --ai-bubble:#f1f4f9; --danger:#d64545;
+  --radius:16px; --shadow:0 8px 30px rgba(30,60,120,.10);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+  background:var(--bg); color:var(--ink); -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;cursor:pointer}
+input,textarea{font-family:inherit}
+
+/* ===== 登录视图 ===== */
+.auth-wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:24px}
+.auth-card{
+  width:100%;max-width:380px;background:var(--panel);border-radius:22px;
+  box-shadow:var(--shadow);padding:36px 32px;
+}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.brand-mark{width:34px;height:34px;border-radius:10px;background:var(--brand);display:flex;align-items:center;justify-content:center}
+.brand-mark svg{width:20px;height:20px}
+.brand-name{font-size:19px;font-weight:700;letter-spacing:.3px}
+.auth-sub{color:var(--ink-2);font-size:13.5px;margin:4px 0 26px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:13px;color:var(--ink-2);margin-bottom:7px}
+.field input{
+  width:100%;height:44px;padding:0 14px;border:1.5px solid var(--line);border-radius:12px;
+  font-size:15px;background:#fafbfe;outline:none;transition:border-color .15s,box-shadow .15s;
+}
+.field input:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft);background:#fff}
+.auth-btn{
+  width:100%;height:46px;border:none;border-radius:12px;background:var(--brand);color:#fff;
+  font-size:15.5px;font-weight:600;transition:background .15s;
+}
+.auth-btn:hover{background:var(--brand-2)}
+.auth-switch{margin-top:16px;text-align:center;font-size:13.5px;color:var(--ink-2)}
+.auth-switch button{background:none;border:none;color:var(--brand);font-weight:600}
+.auth-err{margin-top:14px;font-size:13.5px;color:var(--danger);min-height:18px}
+
+/* ===== 聊天视图 ===== */
+.chat-wrap{display:none;height:100vh;flex-direction:column}
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;padding:14px 22px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+}
+.topbar-left{display:flex;align-items:center;gap:10px}
+.topbar-title{font-weight:700;font-size:16px}
+.topbar-user{font-size:13px;color:var(--ink-2)}
+.logout-btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 14px;font-size:13.5px;color:var(--ink-2)}
+.logout-btn:hover{border-color:var(--brand);color:var(--brand)}
+
+.messages{flex:1;overflow-y:auto;padding:26px 18px;display:flex;flex-direction:column;gap:20px}
+.msg-row{display:flex;gap:12px;max-width:820px;width:100%;margin:0 auto;animation:fade .18s ease}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.avatar{
+  width:34px;height:34px;border-radius:10px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:14px;color:#fff;
+}
+.msg-row.user{flex-direction:row-reverse}
+.msg-row.user .avatar{background:var(--ink-2)}
+.msg-row.ai .avatar{background:var(--brand)}
+.bubble{padding:12px 15px;border-radius:16px;font-size:15px;line-height:1.7;min-width:0;max-width:75%}
+.msg-row.user .bubble{background:var(--user-bubble);color:#fff;border-top-right-radius:4px}
+.msg-row.ai .bubble{background:var(--ai-bubble);color:var(--ink);border-top-left-radius:4px}
+
+/* markdown 渲染 */
+.bubble p{margin:.4em 0}
+.bubble p:first-child{margin-top:0}
+.bubble p:last-child{margin-bottom:0}
+.bubble ul,.bubble ol{margin:.4em 0 .4em 1.3em}
+.bubble li{margin:.25em 0}
+.bubble h1,.bubble h2,.bubble h3{margin:.6em 0 .3em;line-height:1.3}
+.bubble h1{font-size:1.25rem}.bubble h2{font-size:1.12rem}.bubble h3{font-size:1.05rem}
+.bubble code{font-family:"Consolas","JetBrains Mono",monospace;font-size:.88em;background:rgba(47,111,237,.1);padding:1px 5px;border-radius:5px}
+.msg-row.user .bubble code{background:rgba(255,255,255,.18)}
+.bubble pre{background:#0d1424;border-radius:12px;padding:14px;overflow-x:auto;margin:.6em 0}
+.bubble pre code{background:none;padding:0;color:#e6edf7;font-size:.86rem;line-height:1.6}
+.bubble blockquote{border-left:3px solid var(--brand);padding-left:12px;color:var(--ink-2);margin:.5em 0}
+.bubble table{border-collapse:collapse;margin:.5em 0}
+.bubble th,.bubble td{border:1px solid var(--line);padding:6px 10px}
+.bubble a{color:var(--brand)}
+.cursor{display:inline-block;width:8px;height:16px;background:var(--brand);margin-left:2px;vertical-align:-2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+.empty{margin:auto;text-align:center;color:var(--ink-2)}
+.empty .big{font-size:30px;font-weight:700;margin-bottom:8px;color:var(--ink)}
+.empty p{font-size:14.5px}
+
+/* 输入区 */
+.composer{padding:16px 18px 20px;background:var(--panel);border-top:1px solid var(--line)}
+.composer-inner{max-width:820px;margin:0 auto;display:flex;gap:10px;align-items:flex-end}
+.composer textarea{
+  flex:1;resize:none;min-height:46px;max-height:160px;padding:12px 15px;border:1.5px solid var(--line);
+  border-radius:14px;font-size:15px;outline:none;background:#fafbfe;line-height:1.5;
+}
+.composer textarea:focus{border-color:var(--brand);background:#fff}
+.send-btn{
+  width:46px;height:46px;border:none;border-radius:14px;background:var(--brand);color:#fff;flex:none;
+  display:flex;align-items:center;justify-content:center;transition:background .15s;
+}
+.send-btn:hover{background:var(--brand-2)}
+.send-btn:disabled{background:#a9c3f2;cursor:not-allowed}
+.send-btn svg{width:20px;height:20px}
+.hint{max-width:820px;margin:8px auto 0;font-size:12px;color:var(--ink-2);text-align:center}
+
+@media (max-width:600px){
+  .bubble{max-width:85%}
+  .messages{padding:18px 12px;gap:16px}
+  .topbar{padding:12px 16px}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== 登录 / 注册 ===== -->
+<div class="auth-wrap" id="authView">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l2.2 5.6L20 11l-5.8 2.4L12 19l-2.2-5.6L4 11l5.8-2.4L12 3z" fill="#fff"/></svg>
+      </div>
+      <div class="brand-name">AI 助手</div>
+    </div>
+    <div class="auth-sub" id="authSub">登录后开始对话，回答以 Markdown 流式输出</div>
+    <div class="field">
+      <label>用户名</label>
+      <input id="username" type="text" autocomplete="username" placeholder="请输入用户名">
+    </div>
+    <div class="field">
+      <label>密码</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="请输入密码">
+    </div>
+    <button class="auth-btn" id="authBtn">登录</button>
+    <div class="auth-switch">
+      <span id="switchText">还没有账号？</span>
+      <button id="switchBtn">去注册</button>
+    </div>
+    <div class="auth-err" id="authErr"></div>
+  </div>
+</div>
+
+<!-- ===== 聊天 ===== -->
+<div class="chat-wrap" id="chatView">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="brand-mark" style="width:30px;height:30px">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l2.2 5.6L20 11l-5.8 2.4L12 19l-2.2-5.6L4 11l5.8-2.4L12 3z" fill="#fff"/></svg>
+      </div>
+      <div>
+        <div class="topbar-title">AI 助手</div>
+        <div class="topbar-user" id="topbarUser"></div>
+      </div>
+    </div>
+    <button class="logout-btn" id="logoutBtn">退出登录</button>
+  </div>
+
+  <div class="messages" id="messages"></div>
+
+  <div class="composer">
+    <div class="composer-inner">
+      <textarea id="input" placeholder="输入问题，Enter 发送，Shift+Enter 换行"></textarea>
+      <button class="send-btn" id="sendBtn" title="发送">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 12h16m0 0l-6-6m6 6l-6 6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+    <div class="hint">回答由大模型生成，仅供参考</div>
+  </div>
+</div>
+
+<script src="https://fastly.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://fastly.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
+<script>
+/* ===== 全局状态 ===== */
+const state = {
+  token: localStorage.getItem('token') || '',
+  username: localStorage.getItem('username') || '',
+  sending: false,
+};
+
+const $ = (id) => document.getElementById(id);
+const authView = $('authView'), chatView = $('chatView');
+const messagesEl = $('messages');
+
+marked.setOptions({ breaks: true, gfm: true });
+
+function renderMarkdown(text) {
+  const raw = marked.parse(text || '');
+  const clean = DOMPurify.sanitize(raw);
+  return clean;
+}
+function highlightAll(root) {
+  if (window.hljs) {
+    root.querySelectorAll('pre code').forEach((block) => hljs.highlightElement(block));
+  }
+}
+
+/* ===== 鉴权 ===== */
+let mode = 'login'; // login | register
+
+function setMode(m) {
+  mode = m;
+  $('authBtn').textContent = m === 'login' ? '登录' : '注册';
+  $('authSub').textContent = m === 'login' ? '登录后开始对话，回答以 Markdown 流式输出' : '创建新账号，开始你的第一次对话';
+  $('switchText').textContent = m === 'login' ? '还没有账号？' : '已有账号？';
+  $('switchBtn').textContent = m === 'login' ? '去注册' : '去登录';
+  $('authErr').textContent = '';
+}
+
+$('switchBtn').addEventListener('click', () => setMode(mode === 'login' ? 'register' : 'login'));
+
+async function api(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) headers['Authorization'] = 'Bearer ' + state.token;
+  const resp = await fetch(path, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.detail || '请求失败');
+  return data;
+}
+
+$('authBtn').addEventListener('click', doAuth);
+$('password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doAuth(); });
+
+async function doAuth() {
+  const username = $('username').value.trim();
+  const password = $('password').value;
+  if (!username || !password) { $('authErr').textContent = '用户名和密码不能为空'; return; }
+  $('authErr').textContent = '';
+  try {
+    const data = await api('/api/' + mode, { username, password });
+    state.token = data.token;
+    state.username = data.username;
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('username', data.username);
+    enterChat();
+  } catch (e) {
+    $('authErr').textContent = e.message;
+  }
+}
+
+$('logoutBtn').addEventListener('click', () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  state.token = ''; state.username = '';
+  location.reload();
+});
+
+/* ===== 聊天渲染 ===== */
+function addMessage(role, content) {
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + (role === 'user' ? 'user' : 'ai');
+  const avatar = document.createElement('div');
+  avatar.className = 'avatar';
+  avatar.textContent = role === 'user' ? state.username.slice(0, 1).toUpperCase() : 'AI';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  if (role === 'ai') {
+    bubble.innerHTML = renderMarkdown(content);
+    highlightAll(bubble);
+  } else {
+    bubble.textContent = content;
+  }
+  row.appendChild(avatar);
+  row.appendChild(bubble);
+  messagesEl.appendChild(row);
+  scrollBottom();
+  return bubble;
+}
+
+function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+function renderEmpty() {
+  messagesEl.innerHTML = '';
+  const empty = document.createElement('div');
+  empty.className = 'empty';
+  empty.innerHTML = '<div class="big">有什么可以帮你？</div><p>在下方输入问题，AI 会逐字流式回答，支持 Markdown 与代码块</p>';
+  messagesEl.appendChild(empty);
+}
+
+async function loadHistory() {
+  try {
+    const resp = await fetch('/api/history', { headers: { 'Authorization': 'Bearer ' + state.token } });
+    if (!resp.ok) throw new Error('历史加载失败');
+    const data = await resp.json();
+    messagesEl.innerHTML = '';
+    if (!data.messages.length) { renderEmpty(); return; }
+    data.messages.forEach((m) => addMessage(m.role, m.content));
+  } catch (e) {
+    renderEmpty();
+  }
+}
+
+/* ===== 流式发送 ===== */
+$('sendBtn').addEventListener('click', sendQuestion);
+$('input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuestion(); }
+});
+
+async function sendQuestion() {
+  const input = $('input');
+  const question = input.value.trim();
+  if (!question || state.sending) return;
+
+  state.sending = true;
+  setSending(true);
+  // 清空空态
+  const empty = messagesEl.querySelector('.empty');
+  if (empty) empty.remove();
+
+  addMessage('user', question);
+  input.value = '';
+  input.style.height = 'auto';
+
+  const aiBubble = addMessage('ai', '');
+  let full = '';
+  aiBubble.innerHTML = '<span class="cursor"></span>';
+
+  try {
+    // 1. 提交问题到后端，任务进入 Redis 队列，等待 worker 抢任务
+    const submit = await api('/ai_chat/input_chat', { question });
+    const taskId = submit.task_id;
+    if (!taskId) throw new Error('未获取到任务编号');
+
+    // 2. 订阅该任务的流式结果（SSE）
+    const resp = await fetch('/ai_chat/stream/' + taskId, {
+      headers: { 'Authorization': 'Bearer ' + state.token },
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || '请求失败');
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE 按空行切分事件
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
+      for (const evt of events) {
+        const lines = evt.split('\n');
+        let eventName = 'message', dataStr = '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataStr += line.slice(5).trim();
+        }
+        if (!dataStr) continue;
+        let data;
+        try { data = JSON.parse(dataStr); } catch { continue; }
+
+        if (eventName === 'delta') {
+          full += data.content;
+          aiBubble.innerHTML = renderMarkdown(full) + '<span class="cursor"></span>';
+          highlightAll(aiBubble);
+          scrollBottom();
+        } else if (eventName === 'done') {
+          full = data.content || full;
+          aiBubble.innerHTML = renderMarkdown(full);
+          highlightAll(aiBubble);
+        } else if (eventName === 'error') {
+          aiBubble.innerHTML = renderMarkdown('> 出错了：' + (data.detail || '未知错误'));
+        }
+      }
+    }
+  } catch (e) {
+    aiBubble.innerHTML = renderMarkdown('> 请求失败：' + e.message);
+  } finally {
+    state.sending = false;
+    setSending(false);
+    scrollBottom();
+  }
+}
+
+function setSending(flag) {
+  $('sendBtn').disabled = flag;
+  $('input').disabled = flag;
+}
+
+/* 输入框自适应高度 */
+$('input').addEventListener('input', (e) => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 160) + 'px';
+});
+
+/* ===== 启动 ===== */
+function enterChat() {
+  authView.style.display = 'none';
+  chatView.style.display = 'flex';
+  $('topbarUser').textContent = state.username;
+  loadHistory();
+}
+
+if (state.token) {
+  enterChat();
+} else {
+  setMode('login');
+}
+</script>
+</body>
+</html>
