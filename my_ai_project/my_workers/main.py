@@ -4,9 +4,12 @@ import json
 from sqlalchemy import select
 from langchain_core.messages import HumanMessage
 
+from my_ai_project.common import get_logger
 from my_ai_project.mt_connect import my_redis, my_agent, my_database
 
-MAX_RETRY = 3  # 同一任务最多重试次数，避免代码类故障无限重跑
+logger = get_logger(__name__)
+
+MAX_RETRY = 3  # 同一任务最多重试次数
 
 
 async def _mark_state(task_id: str, state: str):
@@ -25,7 +28,7 @@ async def worker_loop():
         try:
             popped = await my_redis.redis_client.blpop(my_redis.QUEUE_KEY, timeout=1)
         except Exception as e:
-            print("Redis 连接异常，3 秒后重连：", e)
+            logger.warning("Redis 连接异常，3 秒后重连：%s", e)
             await asyncio.sleep(3)
             continue
         if not popped:
@@ -36,18 +39,21 @@ async def worker_loop():
             task = json.loads(raw)
             task_id = task["task_id"]
             user_id = task["user_id"]
+            conversation_id = task["conversation_id"]
             question = task["question"]
             retry = int(task.get("retry", 0))
         except Exception as e:
-            print("消息解析失败，丢弃：", raw, e)
+            logger.error("消息解析失败，丢弃：%s | %s", raw, e)
             continue
 
-        print(f"抢到任务：{task_id}")
+        logger.info("抢到任务：%s（会话 %s）", task_id, conversation_id)
 
         try:
             async with my_database.Asyncsession() as conn:
-                # 1. 读取历史、构建 agent
-                messages = await my_agent.load_history_messages(conn, user_id)
+                # 1. 读取本会话历史、构建 agent
+                messages = await my_agent.load_history_messages(
+                    conn, user_id, conversation_id
+                )
                 messages.append(HumanMessage(question))
 
                 agent = await my_agent.build_agent(user_id, conn)
@@ -74,9 +80,15 @@ async def worker_loop():
 
                 answer = "".join(answer_parts).strip() or "（模型未返回内容）"
 
-                # 4. 历史库按一轮两行落库（user 问题 + assistant 回答）
-                conn.add(my_database.Content(user_id=user_id, role="user", message=question))
-                conn.add(my_database.Content(user_id=user_id, role="assistant", message=answer))
+                # 4. 历史库按一轮两行落库（user 问题 + assistant 回答），归属本会话
+                conn.add(my_database.Content(
+                    user_id=user_id, conversation_id=conversation_id,
+                    role="user", message=question,
+                ))
+                conn.add(my_database.Content(
+                    user_id=user_id, conversation_id=conversation_id,
+                    role="assistant", message=answer,
+                ))
 
                 # 5. 任务状态置为已完成，推送完成事件
                 if task_row:
@@ -86,11 +98,11 @@ async def worker_loop():
                 await my_redis.push_event(task_id, "done", {"content": answer})
 
         except Exception as e:
-            print("出现异常", task_id, e)
+            logger.exception("任务执行出现异常：%s", task_id)
             try:
                 await _mark_state(task_id, "失败")
             except Exception as mark_err:
-                print("状态回写失败：", mark_err)
+                logger.error("状态回写失败：%s", mark_err)
 
             await my_redis.push_event(task_id, "error", {"detail": str(e)})
 
@@ -101,7 +113,7 @@ async def worker_loop():
                     my_redis.QUEUE_KEY, json.dumps(task, ensure_ascii=False)
                 )
             else:
-                print(f"任务 {task_id} 超过最大重试次数，不再入队")
+                logger.warning("任务 %s 超过最大重试次数，不再入队", task_id)
             continue
 
 

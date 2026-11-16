@@ -21,6 +21,7 @@ my_ai_project/Redis-x64-*/
 _*.log
 _*.err
 _*.txt
+logs/
 
 # IDE
 .idea/

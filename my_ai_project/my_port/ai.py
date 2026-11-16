@@ -1,42 +1,65 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from my_ai_project.mt_connect import my_database, my_redis, my_auth
+from my_ai_project.mt_connect import my_database, my_redis
+from my_ai_project.mt_connect.auth import get_current_user
 
 router = APIRouter(prefix="/ai_chat", tags=["ai会话"])
 
 
 class Chat_Base(BaseModel):
     question: str
+    conversation_id: str
 
 
 @router.post("/input_chat")
 async def chat(
     params: Chat_Base,
-    current=Depends(my_auth.get_current_user),
+    current=Depends(get_current_user),
     conn=Depends(my_database.get_async_session),
 ):
     task_id = str(uuid.uuid4())
     user_id = current["user_id"]
+    conversation_id = params.conversation_id
 
-    # 任务库只记 task_id、user_id、状态，不记消息正文
+    # 校验会话归属，避免跨用户写入
+    conv = await conn.scalar(
+        select(my_database.Conversation).where(
+            my_database.Conversation.id == conversation_id,
+            my_database.Conversation.user_id == user_id,
+        )
+    )
+    if not conv:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    # 首条问题作为会话标题（空会话标题仍是“新会话”时更新）
+    if conv.title in (None, "", "新会话"):
+        conv.title = params.question.strip()[:128] or "新会话"
+
+    # 任务库只记 task_id、user_id、conversation_id、状态，不记消息正文
     conn.add(
         my_database.TaskChat(
             task_id=task_id,
             user_id=user_id,
+            conversation_id=conversation_id,
             state="未完成",
         )
     )
     await conn.commit()
 
-    # 消息正文（问题、user_id）放进 Redis 队列，等待 worker 抢任务消费
+    # 消息正文（问题、user_id、会话ID）放进 Redis 队列，等待 worker 抢任务消费
     msg = json.dumps(
-        {"task_id": task_id, "user_id": user_id, "question": params.question.strip()},
+        {
+            "task_id": task_id,
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "question": params.question.strip(),
+        },
         ensure_ascii=False,
     )
     await my_redis.redis_client.lpush(my_redis.QUEUE_KEY, msg)
@@ -46,7 +69,7 @@ async def chat(
 @router.get("/task")
 async def get_task(
     task_id: str,
-    current=Depends(my_auth.get_current_user),
+    current=Depends(get_current_user),
     conn=Depends(my_database.get_async_session),
 ):
     res = await conn.scalar(
@@ -60,7 +83,7 @@ async def get_task(
 @router.get("/stream/{task_id}")
 async def stream_result(
     task_id: str,
-    current=Depends(my_auth.get_current_user),
+    current=Depends(get_current_user),
 ):
     """前端订阅某任务的流式结果：从 Redis 结果通道逐条读取 worker 写入的分片，SSE 推给浏览器。"""
     key = my_redis.result_key(task_id)

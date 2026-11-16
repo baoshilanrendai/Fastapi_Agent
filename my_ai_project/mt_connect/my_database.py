@@ -38,23 +38,35 @@ class User(Base):
     create_time = Column(DateTime, default=datetime.now)
 
 
-# 历史库：一条记录一行，一轮对话占两行（user / assistant）
+# 历史库：一条记录一行，一轮对话占两行（user / assistant），按会话分组
 class Content(Base):
     __tablename__ = "content"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(32), index=True, nullable=False)
+    conversation_id = Column(String(36), index=True, nullable=False)
     role = Column(Enum("user", "assistant"), nullable=False)
     message = Column(Text, nullable=False)
     create_time = Column(DateTime, default=datetime.now)
 
 
-# 任务库：只记任务 id、所属用户、状态、时间
+# 会话库：一个会话一条记录，标题取首条用户问题
+class Conversation(Base):
+    __tablename__ = "conversation"
+
+    id = Column(String(36), primary_key=True)
+    user_id = Column(String(32), index=True, nullable=False)
+    title = Column(String(128), default="新会话")
+    create_time = Column(DateTime, default=datetime.now)
+
+
+# 任务库：只记任务 id、所属会话、所属用户、状态、时间
 class TaskChat(Base):
     __tablename__ = "task_chat"
 
     task_id = Column(String(36), primary_key=True)
     user_id = Column(String(32), index=True, nullable=False)
+    conversation_id = Column(String(36), index=True, nullable=False)
     state = Column(
         Enum("失败", "未完成", "进行中", "已完成"),
         default="未完成",

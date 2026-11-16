@@ -62,12 +62,18 @@ p1/
 ├── stop.ps1                        # 一键停止全部服务
 ├── .env.example                    # 环境变量模板（实际 .env 不入库）
 └── my_ai_project/
-    ├── .env                        # 本地环境变量（数据库 / Redis / 模型地址）
+    ├── .env                        # 本地环境变量（数据库 / Redis / 模型地址 / MCP）
+    ├── common/                     # 跨层公共工具
+    │   └── logger.py               # 统一日志：控制台 + 按天滚动文件
     ├── mt_connect/                 # 基础设施连接层
     │   ├── my_database.py          # SQLAlchemy 引擎、ORM 模型、会话工厂、建表
     │   ├── my_redis.py             # Redis 客户端、结果通道写入封装
-    │   ├── my_agent.py             # 模型初始化、历史消息加载、Agent 构建
-    │   └── my_auth.py              # 注册 / 登录 / Token 校验依赖
+    │   ├── my_agent.py             # 模型初始化、历史消息加载、Agent 构建（挂载 MCP 工具）
+    │   ├── auth/                   # 认证鉴权子包
+    │   │   └── my_auth.py          # 注册 / 登录 / Token 校验依赖
+    │   └── mcp/                    # MCP 客户端子包
+    │       ├── client.py           # 传输层：连接 / 握手 / 列工具 / 原始调用
+    │       └── tools.py            # 适配层：转 LangChain Tool、结果归一化、调用入口
     ├── my_port/                    # FastAPI 接口层
     │   ├── main.py                 # 应用入口、CORS、静态托管、路由挂载
     │   ├── chat.py                 # 注册 / 登录 / 历史记录接口
@@ -88,12 +94,22 @@ p1/
 | password_hash | varchar(128) | 口令 SHA-256 哈希（不存明文） |
 | create_time | datetime | 注册时间 |
 
-### `content`（对话历史表，一条记录一行）
+### `conversation`（会话表，一个会话一条记录）
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | varchar(36), 主键 | 会话 ID（UUID） |
+| user_id | varchar(32), 索引 | 所属用户 ID |
+| title | varchar(128) | 会话标题，取首条用户问题 |
+| create_time | datetime | 创建时间 |
+
+### `content`（对话历史表，一条记录一行，按会话分组）
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | int, 主键, 自增 | 记录 ID |
 | user_id | varchar(32), 索引 | 所属用户 ID |
+| conversation_id | varchar(36), 索引 | 所属会话 ID |
 | role | enum(user, assistant) | 消息角色 |
 | message | text | 消息内容（Markdown） |
 | create_time | datetime | 发言时间 |
@@ -113,8 +129,11 @@ p1/
 | --- | --- | --- | --- |
 | POST | `/api/register` | 否 | 注册账号，返回 token |
 | POST | `/api/login` | 否 | 登录，返回 token |
-| GET | `/api/history` | 是 | 拉取当前用户历史对话 |
-| POST | `/ai_chat/input_chat` | 是 | 提交问题，生成任务并入队 |
+| GET | `/api/me` | 是 | 当前用户信息与会话/消息统计 |
+| GET | `/api/conversations` | 是 | 会话列表（按最近活跃倒序） |
+| POST | `/api/conversations` | 是 | 新建会话，返回 conversation_id |
+| GET | `/api/history?conversation_id=` | 是 | 拉取指定会话的历史消息 |
+| POST | `/ai_chat/input_chat` | 是 | 提交问题（带 conversation_id），生成任务入队 |
 | GET | `/ai_chat/stream/{task_id}` | 是 | SSE 订阅任务流式结果 |
 | GET | `/ai_chat/task` | 是 | 查询任务状态 |
 
@@ -158,6 +177,17 @@ REDIS_URL='redis://127.0.0.1:6379/0'
 ```
 
 > 大模型 API Key 从系统环境变量 `ai_key` 读取，不写入 `.env`。
+
+MCP 客户端可接入外部 MCP server，工具会自动挂载到 Agent：
+
+```ini
+MCP_TRANSPORT='stdio'                 # stdio（本地子进程）或 http（远程端点）
+MCP_COMMAND='python'                  # stdio：启动命令
+MCP_ARGS='-m,your_mcp_server_module'  # stdio：参数，逗号分隔
+MCP_URL='http://127.0.0.1:8000/mcp'   # http：端点地址
+```
+
+> MCP 连接失败时自动降级为纯模型对话，不阻断主流程；日志写入 `logs/` 目录。
 
 ### 4. 启动服务
 

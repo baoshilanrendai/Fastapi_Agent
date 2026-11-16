@@ -7,7 +7,11 @@ from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from dotenv import load_dotenv
 
+from my_ai_project.common import get_logger
 from my_ai_project.mt_connect import my_database
+from my_ai_project.mt_connect.mcp import McpClient, get_langchain_tools
+
+logger = get_logger(__name__)
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -20,11 +24,14 @@ model = init_chat_model(
 )
 
 
-async def load_history_messages(conn, user_id: str, limit: int = 20):
-    """从历史库按时间正序读取最近的对话，转成 LangChain 消息列表。"""
+async def load_history_messages(conn, user_id: str, conversation_id: str, limit: int = 20):
+    """从历史库按会话、时间正序读取最近的对话，转成 LangChain 消息列表。"""
     rows = await conn.scalars(
         select(my_database.Content)
-        .where(my_database.Content.user_id == user_id)
+        .where(
+            my_database.Content.user_id == user_id,
+            my_database.Content.conversation_id == conversation_id,
+        )
         .order_by(my_database.Content.create_time.desc())
         .limit(limit)
     )
@@ -41,10 +48,24 @@ async def load_history_messages(conn, user_id: str, limit: int = 20):
     return messages
 
 
+async def _load_mcp_tools() -> list:
+    """连接 MCP server 并把其工具适配成 LangChain Tool 列表。
+
+    连接失败时记录日志并返回空列表，降级为纯模型对话，不阻断主流程。
+    """
+    try:
+        async with McpClient() as client:
+            return await get_langchain_tools(client)
+    except Exception as e:
+        logger.warning("MCP 工具加载失败，本次对话不挂载外部工具：%s", e)
+        return []
+
+
 async def build_agent(user_id: str, conn):
-    """构建 agent（当前不携带工具）。历史消息在调用处通过 load_history_messages 传入。"""
+    """构建 agent；挂载 MCP 暴露的工具，历史消息在调用处通过 load_history_messages 传入。"""
+    tools = await _load_mcp_tools()
     agent = create_agent(
         model=model,
-        tools=[],
+        tools=tools,
     )
     return agent
